@@ -1,0 +1,141 @@
+// TB6612 pin definitions
+const int right_R1=12;    
+const int right_R2=13;
+const int PWM_R=10;
+
+const int left_L1=6;
+const int left_L2=7;
+const int PWM_L=9;
+
+const int STBY=8;
+
+bool state_fast_cw;    //빠른 정방향
+bool state_fast_ccw;   //빠른 역방향
+bool state_cw;         //정방향
+bool state_ccw;        //역방향
+
+void comm_blue(void);
+void run_motor(void);
+
+void setup()
+{
+   // Set motor control pins as OUTPUT
+  pinMode(right_R1,OUTPUT);       
+  pinMode(right_R2,OUTPUT);
+  pinMode(left_L1,OUTPUT);
+  pinMode(left_L2,OUTPUT);
+  pinMode(PWM_R,OUTPUT);
+  pinMode(PWM_L,OUTPUT);
+  pinMode(STBY, OUTPUT); 
+
+  // Assign initial state values
+  digitalWrite(right_R1,1);
+  digitalWrite(right_R2,0);
+  digitalWrite(left_L1,0);
+  digitalWrite(left_L2,1);
+  digitalWrite(STBY, 1);    // Chip enable
+
+  analogWrite(PWM_R,0);
+  analogWrite(PWM_L,0);
+
+  Serial.begin(9600);
+  Serial.println("press keys 'a', 'b', 'c' or 'd' to start");
+}
+
+void loop() {
+  comm_blue();
+  run_motor();
+}
+
+void comm_blue()
+{
+  if (Serial.available())
+  {
+    char data = Serial.read();
+
+    switch (data)
+    {
+      case 'a' : state_fast_cw = 1; break;
+      case 'b' : state_fast_ccw = 1; break;
+      case 'c' : state_cw = 1; break;
+      case 'd' : state_ccw = 1; break;
+    }
+  }
+}
+
+void run_motor()
+{
+  if (state_fast_cw)
+  {
+    digitalWrite(left_L1,LOW);
+    digitalWrite(left_L2,HIGH);
+    analogWrite(PWM_L,50);
+    digitalWrite(right_R1,LOW);
+    digitalWrite(right_R2,HIGH);
+    analogWrite(PWM_R,50);
+
+    delay(3000);
+
+    state_fast_cw = 0;
+
+    Serial.println("press keys 'a', 'b', 'c' or 'd' to start");
+  }
+
+  else if (state_fast_ccw)
+  {
+    digitalWrite(left_L1,HIGH);
+    digitalWrite(left_L2,LOW);
+    analogWrite(PWM_L,50);
+    digitalWrite(right_R1,HIGH);
+    digitalWrite(right_R2,LOW);
+    analogWrite(PWM_R,50);
+
+    delay(3000);
+
+    state_fast_ccw = 0;
+
+    Serial.println("press keys 'a', 'b', 'c' or 'd' to start");
+  }
+
+  else if (state_cw)
+  {
+    digitalWrite(left_L1,LOW);
+    digitalWrite(left_L2,HIGH);
+    analogWrite(PWM_L,25);
+    digitalWrite(right_R1,LOW);
+    digitalWrite(right_R2,HIGH);
+    analogWrite(PWM_R,25);
+
+    delay(3000);
+
+    state_cw = 0;
+
+    Serial.println("press keys 'a', 'b', 'c' or 'd' to start");
+  }
+
+  else if (state_ccw)
+  {
+    digitalWrite(left_L1,HIGH);
+    digitalWrite(left_L2,LOW);
+    analogWrite(PWM_L,25);
+    digitalWrite(right_R1,HIGH);
+    digitalWrite(right_R2,LOW);
+    analogWrite(PWM_R,25);
+
+    delay(3000);
+
+    state_ccw = 0;
+
+    Serial.println("press keys 'a', 'b', 'c' or 'd' to start");
+  }
+
+  else
+  {
+    digitalWrite(left_L1,HIGH);
+    digitalWrite(left_L2,LOW);
+    analogWrite(PWM_L,0);
+    digitalWrite(right_R1,HIGH);
+    digitalWrite(right_R2,LOW);
+    analogWrite(PWM_R,0);
+  }
+}
