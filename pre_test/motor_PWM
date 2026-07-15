@@ -1,0 +1,70 @@
+// TB6612 pin definitions
+const int right_R1=12;    
+const int right_R2=13;
+const int PWM_R=10;
+
+const int left_L1=6;
+const int left_L2=7;
+const int PWM_L=9;
+
+const int STBY=8;
+
+
+void setup() 
+{
+  // Set motor control pins as OUTPUT
+  pinMode(right_R1,OUTPUT);       
+  pinMode(right_R2,OUTPUT);
+  pinMode(left_L1,OUTPUT);
+  pinMode(left_L2,OUTPUT);
+  pinMode(PWM_R,OUTPUT);
+  pinMode(PWM_L,OUTPUT);
+  pinMode(STBY, OUTPUT); 
+
+  // Assign initial state values
+  digitalWrite(right_R1,1);
+  digitalWrite(right_R2,0);
+  digitalWrite(left_L1,0);
+  digitalWrite(left_L2,1);
+  digitalWrite(STBY, 1);    // Chip enable
+
+  analogWrite(PWM_R,0);
+  analogWrite(PWM_L,0);
+
+  delay(3000);
+}
+
+void loop() 
+{
+  //forward
+  digitalWrite(left_L1,LOW);
+  digitalWrite(left_L2,HIGH);
+  analogWrite(PWM_L,30);
+  digitalWrite(right_R1,LOW);
+  digitalWrite(right_R2,HIGH);
+  analogWrite(PWM_R,30);
+
+  delay(5000);
+
+  //backward
+  digitalWrite(left_L1,HIGH);
+  digitalWrite(left_L2,LOW);
+  analogWrite(PWM_L,30);
+  digitalWrite(right_R1,HIGH);
+  digitalWrite(right_R2,LOW);
+  analogWrite(PWM_R,30);
+
+  delay(5000);
+
+  //stop
+  digitalWrite(left_L1,LOW);
+  digitalWrite(left_L2,LOW);
+  analogWrite(PWM_L,0);
+  digitalWrite(right_R1,LOW);
+  digitalWrite(right_R2,LOW);
+  analogWrite(PWM_R,0);
+
+  delay(5000);
+}
+
+
