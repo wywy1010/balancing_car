@@ -1,0 +1,88 @@
+#include <MsTimer2.h>        // Timer2 library
+#include <PinChangeInterrupt.h>    // This library enables all pins as external interrupts
+
+// TB6612 pin definitions
+const int right_R1=12;    
+const int right_R2=13;
+const int PWM_R=10;
+
+const int left_L1=6;
+const int left_L2=7;
+const int PWM_L=9;
+
+const int STBY=8;
+
+/////////////////////////////////Interrupt speed count/////////////////////////////
+#define PinA_left 2    // External interrupt
+#define PinA_right 4   // External interrupt
+volatile long count_right = 0; // Pulse count from Hall encoder (volatile long ensures value validity)
+volatile long count_left = 0;
+
+
+void setup() {
+  // Set motor control pins as OUTPUT
+  pinMode(right_R1,OUTPUT);       
+  pinMode(right_R2,OUTPUT);
+  pinMode(left_L1,OUTPUT);
+  pinMode(left_L2,OUTPUT);
+  pinMode(PWM_R,OUTPUT);
+  pinMode(PWM_L,OUTPUT);
+  pinMode(STBY, OUTPUT); 
+
+  // Assign initial state values
+  digitalWrite(left_L1,LOW);
+  digitalWrite(left_L2,LOW);
+  analogWrite(PWM_L,0);
+  digitalWrite(right_R1,LOW);
+  digitalWrite(right_R2,LOW);
+  analogWrite(PWM_R,0);
+  digitalWrite(STBY, 1);    // Chip enable
+  
+  pinMode(PinA_left, INPUT);  // Left speed encoder input
+  pinMode(PinA_right, INPUT); // Right speed encoder input
+
+  Serial.begin(9600);                         //  Open serial monitor, set baud rate to 9600
+  delay(1500);
+
+
+  attachInterrupt(
+    digitalPinToInterrupt(2),
+    Code_left,
+    CHANGE
+  );        // Trigger on change; execute Code_left
+  attachPinChangeInterrupt(
+    digitalPinToPinChangeInterrupt(4),
+    Code_right,
+    CHANGE
+  );
+}
+
+void loop()
+{
+  long current_left = count_left;
+  count_left = 0;
+  long current_right = count_right;
+  count_right = 0;
+
+  Serial.print("L=");
+  Serial.print(current_left);
+
+  Serial.print(" R=");
+  Serial.println(current_right);
+
+  Serial.println("==========");
+
+  delay(500);
+}
+
+// Left speed encoder count
+void Code_left() 
+{
+  count_left ++;
+} 
+
+// Right speed encoder count
+void Code_right() 
+{
+  count_right ++;
+} 
