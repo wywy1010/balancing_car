@@ -29,10 +29,10 @@ void setup()
   pinMode(STBY, OUTPUT); 
 
   // Assign initial state values
-  digitalWrite(right_R1,1);
-  digitalWrite(right_R2,0);
-  digitalWrite(left_L1,0);
-  digitalWrite(left_L2,1);
+  digitalWrite(right_R1,HIGH);
+  digitalWrite(right_R2,LOW);
+  digitalWrite(left_L1,HIGH);
+  digitalWrite(left_L2,LOW);
   digitalWrite(STBY, 1);    // Chip enable
 
   analogWrite(PWM_R,0);
@@ -78,6 +78,9 @@ void run_motor()
 
     state_fast_cw = 0;
 
+    analogWrite(PWM_L,0);
+    analogWrite(PWM_R,0);
+
     Serial.println("press keys 'a', 'b', 'c' or 'd' to start");
   }
 
@@ -93,6 +96,9 @@ void run_motor()
     delay(3000);
 
     state_fast_ccw = 0;
+    
+    analogWrite(PWM_L,0);
+    analogWrite(PWM_R,0);
 
     Serial.println("press keys 'a', 'b', 'c' or 'd' to start");
   }
@@ -110,6 +116,9 @@ void run_motor()
 
     state_cw = 0;
 
+    analogWrite(PWM_L,0);
+    analogWrite(PWM_R,0);
+
     Serial.println("press keys 'a', 'b', 'c' or 'd' to start");
   }
 
@@ -123,6 +132,9 @@ void run_motor()
     analogWrite(PWM_R,25);
 
     delay(3000);
+
+    analogWrite(PWM_L,0);
+    analogWrite(PWM_R,0);
 
     state_ccw = 0;
 
