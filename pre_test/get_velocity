@@ -1,0 +1,189 @@
+#include <MsTimer2.h>        // Timer2 library
+#include <PinChangeInterrupt.h>    // This library enables all pins as external interrupts
+
+// TB6612 pin definitions
+const int right_R1=12;    
+const int right_R2=13;
+const int PWM_R=10;
+
+const int left_L1=6;
+const int left_L2=7;
+const int PWM_L=9;
+
+const int STBY=8;
+
+#define PinA_left 2    //Encoder of Left
+#define PinA_right 4   //Encoder of Right
+
+volatile long count_right = 0; // Pulse count from Hall encoder (volatile long ensures value validity)
+volatile long count_left = 0;
+
+unsigned long prev_pwm = 0;
+unsigned long prev_velo = 0;
+
+float velo_left = 0;
+float velo_right = 0;
+
+bool flag_send_avail = 1;
+
+int duty = 0;    //0: 10%, 1: 50%, 2: 100%
+int duty_val[3] = {20, 40, 60};     //25, 128, 255
+
+void init_motor (void);
+void init_interrupt (void);
+void get_velocity (void);
+void send_velocity (void);
+void change_pwm (void);
+void code_right (void);
+void code_left (void);
+
+
+void setup() 
+{
+  init_motor();
+  init_interrupt();
+
+  Serial.begin(9600);   //set baud rate to 9600
+
+  analogWrite(PWM_R, duty_val[0]);
+  analogWrite(PWM_L, duty_val[0]);
+
+  unsigned long now = millis();
+  prev_pwm = now;
+  prev_velo = now;
+}
+
+void loop()
+{
+  unsigned long current_time = millis();
+
+  if (current_time - prev_velo >= 100)
+  {
+    get_velocity();
+    prev_velo += 100;
+  }
+
+  if ((current_time - prev_pwm >= 2000) && flag_send_avail == 1)
+  {
+    flag_send_avail = 0;
+    send_velocity();
+  }
+
+  if (current_time - prev_pwm >= 5000)
+  {
+    change_pwm();
+    prev_pwm += 5000;
+    flag_send_avail = 1;
+  }
+}
+
+//=============================User Function============================
+
+void init_motor()
+{
+  pinMode(right_R1,OUTPUT);       
+  pinMode(right_R2,OUTPUT);
+  pinMode(left_L1,OUTPUT);
+  pinMode(left_L2,OUTPUT);
+  pinMode(PWM_R,OUTPUT);
+  pinMode(PWM_L,OUTPUT);
+  pinMode(STBY, OUTPUT); 
+  pinMode(PinA_left, INPUT);  // Left speed encoder input
+  pinMode(PinA_right, INPUT); // Right speed encoder input
+
+  digitalWrite(STBY, 1);    // Chip enable
+
+  //Assign initial state values -> CW
+  digitalWrite(right_R1,LOW);
+  digitalWrite(right_R2,HIGH);
+  digitalWrite(left_L1,LOW);
+  digitalWrite(left_L2,HIGH);
+}
+
+void init_interrupt()   //Trigger on rising edge; execute Code_left and Code_right
+{
+  attachInterrupt(
+    digitalPinToInterrupt(2),
+    code_left,
+    RISING
+  ); 
+
+  attachPinChangeInterrupt(
+    digitalPinToPinChangeInterrupt(4),
+    code_right,
+    RISING
+  );
+}
+
+// Left speed encoder count
+void code_left() 
+{
+  count_left ++;
+} 
+
+// Right speed encoder count
+void code_right() 
+{
+  count_right ++;
+} 
+
+void get_velocity()
+{
+  noInterrupts();
+  unsigned long current_count_left = count_left; 
+  unsigned long current_count_right = count_right;
+  count_left = 0;
+  count_right = 0;
+  interrupts();
+
+  velo_left = (current_count_left * 0.987);    //cm/s
+  velo_right = (current_count_right * 0.987);  //cm/s
+}
+
+void send_velocity()
+{
+  if(duty == 0)
+  {
+    Serial.println("Duty is 10%");
+    Serial.print("the velocity of Left : ");
+    Serial.print(velo_left);
+    Serial.println(" cm/s");
+    Serial.print("the velocity of Right : ");
+    Serial.print(velo_right);
+    Serial.println(" cm/s");
+    Serial.println("============================");
+  }
+
+  else if(duty == 1)
+  {
+    Serial.println("Duty is 50%");
+    Serial.print("the velocity of Left : ");
+    Serial.print(velo_left);
+    Serial.println(" cm/s");
+    Serial.print("the velocity of Right : ");
+    Serial.print(velo_right);
+    Serial.println(" cm/s");
+    Serial.println("============================");
+  }
+
+  else
+  {
+    Serial.println("Duty is 100%");
+    Serial.print("the velocity of Left : ");
+    Serial.print(velo_left);
+    Serial.println(" cm/s");
+    Serial.print("the velocity of Right : ");
+    Serial.print(velo_right);
+    Serial.println(" cm/s");
+    Serial.println("============================");
+  }
+
+}
+
+void change_pwm()
+{
+  duty = (duty + 1) % 3;    //0: 10%, 1: 50%, 2: 100%
+
+  analogWrite(PWM_R, duty_val[duty]);
+  analogWrite(PWM_L, duty_val[duty]);
+}
