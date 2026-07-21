@@ -1,0 +1,198 @@
+//#include <MsTimer2.h>        //Timer2 library
+#include <PinChangeInterrupt.h>    // This library enables all pins as external interrupts
+
+// TB6612 pin definitions
+const int right_R1=12;    
+const int right_R2=13;
+const int PWM_R=10;
+
+const int left_L1=6;
+const int left_L2=7;
+const int PWM_L=9;
+
+const int STBY=8;
+
+#define PinA_left 2    //Encoder of Left
+#define PinA_right 4   //Encoder of Right
+
+volatile long count_right = 0; // Pulse count from Hall encoder (volatile long ensures value validity)
+volatile long count_left = 0;
+
+volatile bool flag_next = 0;
+volatile bool flag_velo = 0;
+volatile bool flag_ready_send = 0;
+
+volatile int count_5s = 0;
+volatile int count_2s = 0;
+volatile int count_100ms = 0;
+
+int velo_left = 0;
+int velo_right = 0;
+
+int duty = 0;    //0: 10%, 1: 50%, 2: 100%
+int duty_val[3] = {25, 100, 175};     //25, 128, 255
+
+// Left speed encoder count
+void code_left() 
+{
+  count_left ++;
+} 
+
+// Right speed encoder count
+void code_right() 
+{
+  count_right ++;
+} 
+
+void get_velocity()
+{
+  noInterrupts();
+  unsigned long current_count_left = count_left; 
+  unsigned long current_count_right = count_right;
+  count_left = 0;
+  count_right = 0;
+  interrupts();
+
+  velo_left = (current_count_left * 30);    //pulse/min
+  velo_right = (current_count_right * 30);  //pulse/min
+}
+
+void send_velocity()
+{
+  if(duty == 0)
+  {
+    Serial.print(velo_left);
+    Serial.println(" pulse/min (Left, 10%)");
+    Serial.print(velo_right);
+    Serial.println(" pulse/min (Right, 10%)");
+  }
+
+  else if(duty == 1)
+  {
+    Serial.print(velo_left);
+    Serial.println(" pulse/min (Left, 40%)");
+    Serial.print(velo_right);
+    Serial.println(" pulse/min (Right, 40%)");
+  }
+
+  else
+  {
+    Serial.print(velo_left);
+    Serial.println(" pulse/min (Left, 70%)");
+    Serial.print(velo_right);
+    Serial.println(" pulse/min (Right, 70%)");
+  }
+
+}
+
+void change_pwm()
+{
+  duty = (duty + 1) % 3;    //0: 10%, 1: 50%, 2: 100%
+
+  analogWrite(PWM_R, duty_val[duty]);
+  analogWrite(PWM_L, duty_val[duty]);
+}
+
+void init_interrupt(void)
+{
+  noInterrupts();
+  TCCR2A = 0x00;
+  TCCR2B = 0x04;
+  TCNT2 = 0x06;
+  TIMSK2 = 0x01;
+  interrupts();
+
+  noInterrupts();
+  TCCR2A = 0x00;
+  TCCR2B = 0x04;
+  TCNT2 = 0x06;
+  TIMSK2 = 0x01;
+  interrupts();
+
+  attachInterrupt(
+    digitalPinToInterrupt(2),
+    code_left,
+    RISING
+  ); 
+
+  attachPinChangeInterrupt(
+    digitalPinToPinChangeInterrupt(4),
+    code_right,
+    RISING
+  );
+}
+
+void init_motor(void)
+{
+  pinMode(right_R1,OUTPUT);       
+  pinMode(right_R2,OUTPUT);
+  pinMode(left_L1,OUTPUT);
+  pinMode(left_L2,OUTPUT);
+  pinMode(PWM_R,OUTPUT);
+  pinMode(PWM_L,OUTPUT);
+  pinMode(STBY, OUTPUT); 
+  pinMode(PinA_left, INPUT);  // Left speed encoder input
+  pinMode(PinA_right, INPUT); // Right speed encoder input
+
+  digitalWrite(STBY, 1);    // Chip enable
+
+  //Assign initial state values -> CW
+  digitalWrite(right_R1,LOW);
+  digitalWrite(right_R2,HIGH);
+  digitalWrite(left_L1,LOW);
+  digitalWrite(left_L2,HIGH);
+}
+
+ISR(TIMER2_OVF_vect)
+{
+  TCNT2 = 0x06;
+  count_100ms++;
+  count_2s++;
+  count_5s++;
+
+  if (count_100ms >= 100)
+  {
+    count_100ms = 0;
+    flag_velo = 1;
+  }
+
+  if (count_5s >= 5000)
+  {
+    count_2s = 0;
+    count_5s = 0;
+    flag_next = 1;
+    flag_ready_send = 1;
+  }
+}
+
+void setup() {
+  init_interrupt();
+  init_motor();
+
+  Serial.begin(9600);
+
+  analogWrite(PWM_R, duty_val[0]);
+  analogWrite(PWM_L, duty_val[0]);
+
+  flag_ready_send = 1;
+}
+
+void loop() {
+  if(flag_velo)
+  {
+    flag_velo = 0;
+    get_velocity();
+  }
+
+  if((flag_ready_send == 1) && (count_2s >= 2000))
+  {
+    flag_ready_send = 0;
+    send_velocity();
+  }
+
+  if(flag_next)
+  {
+    flag_next = 0;
+    change_pwm();
+  }
+}
