@@ -1,0 +1,351 @@
+//getmotion() needs 1798.5, 1798.9, 1799.5 us
+//angle_calculate() needs 845.88, 846.52, 841.05 us 
+#include <MsTimer2.h>
+#include <PinChangeInt.h>
+#include <MPU6050.h>
+#include <Wire.h>
+#include <HCSR04.h>
+
+MPU6050 mpu6050;
+
+const int test = 3;
+
+// 모터 핀 (TB6612)
+const int right_R1 = 12, right_R2 = 13, PWM_R = 10;
+const int left_L1  = 6,  left_L2  = 7,  PWM_L = 9;
+const int STBY     = 8;
+
+// 엔코더 핀
+#define PinA_left  2
+#define PinA_right 4
+
+volatile long count_left  = 0;
+volatile long count_right = 0;
+
+// IMU raw 및 가공 변수
+int16_t ax, ay, az, gx, gy, gz;
+float Gyro_x, Gyro_y, Gyro_z;
+float angle0 = 0; // 기계적 수평 오프셋
+
+// 칼만 필터 변수
+float Q_angle = 0.001, Q_gyro = 0.003, R_angle = 0.5;
+char  C_0 = 1;
+const float dt = 0.005f; // 제어 주기: 5ms
+float K1 = 0.05f;
+
+float angle = 0, angle_speed = 0, angle_err = 0, q_bias = 0;
+float K_0, K_1, t_0, t_1;
+float Pdot[4] = {0, 0, 0, 0};
+float P[2][2] = {{1, 0}, {0, 1}};
+float PCt_0, PCt_1, E;
+float angleY_one = 0; // Y축 상보필터 출력값
+
+// 제어 게인
+double kp = 49.4, ki = 0.0, kd = 0.58;                  // 각도 루프 (PD)  38, 0.0, 0.58
+double kp_speed = 3.8, ki_speed = 0.11, kd_speed = 0.0; // 속도 루프 (PI)
+double kp_turn = 15, ki_turn = 0, kd_turn = 0.15;     // 회전 루프 (PD)
+
+double setp0 = 0;
+int    PD_pwm = 0;
+double PI_pwm = 0;
+float  pwm1 = 0, pwm2 = 0;
+
+// 속도 루프 변수
+long lz = 0, rz = 0;
+int  rpulse = 0, lpulse = 0;
+int  pulseright = 0, pulseleft = 0;
+float speeds_filterold = 0, speeds_filter = 0, positions = 0;
+
+// 스케줄러 및 회전 변수
+int cc = 0, turncc = 0;
+int turnmax = 2, turnmin = -2;
+float Turn_pwm = 0, turnout = 0;
+
+int carfront = 0, carback = 0, carleft = 0, carright = 0;
+char val;
+
+HCSR04 hc(A2, A3);
+float fultrasonic = 0, Distance = 0;
+unsigned long lastUltraMs = 0;
+
+volatile bool controlTick = false;
+
+// 5ms 타이머 ISR
+void TimingInterrupt() { controlTick = true; }
+
+void Code_left()  { count_left++;  }
+void Code_right() { count_right++; }
+
+void Kalman_Filter(double angle_m, double gyro_m)
+{
+  angle += (gyro_m - q_bias) * dt;
+  angle_err = angle_m - angle;
+
+  Pdot[0] = Q_angle - P[0][1] - P[1][0];
+  Pdot[1] = -P[1][1];
+  Pdot[2] = -P[1][1];
+  Pdot[3] = Q_gyro;
+
+  P[0][0] += Pdot[0] * dt;
+  P[0][1] += Pdot[1] * dt;
+  P[1][0] += Pdot[2] * dt;
+  P[1][1] += Pdot[3] * dt;
+
+  PCt_0 = C_0 * P[0][0];
+  PCt_1 = C_0 * P[1][0];
+
+  E = R_angle + C_0 * PCt_0;
+
+  K_0 = PCt_0 / E;
+  K_1 = PCt_1 / E;
+
+  t_0 = PCt_0;
+  t_1 = C_0 * P[0][1];
+
+  P[0][0] -= K_0 * t_0;
+  P[0][1] -= K_0 * t_1;
+  P[1][0] -= K_1 * t_0;
+  P[1][1] -= K_1 * t_1;
+
+  q_bias += K_1 * angle_err;
+  angle_speed = gyro_m - q_bias;
+  angle += K_0 * angle_err;
+}
+
+// Y축 1차 상보필터
+void Yiorderfilter(float angle_m, float gyro_m)
+{
+  angleY_one = K1 * angle_m + (1.0f - K1) * (angleY_one + gyro_m * dt);
+}
+
+void angle_calculate(int16_t ax, int16_t ay, int16_t az, int16_t gx, int16_t gy, int16_t gz)
+{
+  // X축 Pitch (칼만 필터)
+  float Angle = -atan2((float)ay, (float)az) * (180.0f / PI);
+  Gyro_x = -(float)gx / 131.0f;
+  Kalman_Filter(Angle, Gyro_x);
+
+  Gyro_z = -(float)gz / 131.0f;
+
+  // Y축 Roll (상보필터)
+  float angleAx = -atan2((float)ax, (float)az) * (180.0f / PI);
+  Gyro_y = -(float)gy / 131.0f;
+  Yiorderfilter(angleAx, Gyro_y);
+}
+
+void AnglePD()
+{
+  PD_pwm = (int)(kp * (angle + angle0) + kd * angle_speed);
+}
+
+// 속도 PI 제어 (40ms 주기)
+void carspeedpiout()
+{
+  float speeds = (float)(pulseleft + pulseright);
+  pulseright = 0;
+  pulseleft  = 0;
+
+  speeds_filterold *= 0.7f;
+  speeds_filter = speeds_filterold + speeds * 0.3f;
+  speeds_filterold = speeds_filter;
+
+  positions += speeds_filter;
+  positions += (float)carfront;
+  positions += (float)carback;
+  positions += fultrasonic;
+  positions = constrain(positions, -3550.0f, 3550.0f);
+
+  PI_pwm = ki_speed * (setp0 - positions) + kp_speed * (setp0 - speeds_filter);
+}
+
+void carturnspin()
+{
+  float turnspeed = fabs(speeds_filter);
+  if (turnspeed < 1.0f) turnspeed = 1.0f;
+
+  float rotationratio = 0.5f;
+  if (carleft == 1 || carright == 1 || carleft == -1 || carright == -1)
+  {
+    rotationratio = 3.0f / turnspeed;
+    rotationratio = constrain(rotationratio, 0.5f, 5.0f);
+
+    turnmax = 2;
+    turnmin = -2;
+  }
+  else
+  {
+    turnout = 0;
+  }
+
+  if (carleft == 1)  turnout += rotationratio;
+  else if (carright == 1)  turnout -= rotationratio;
+
+  if (turnout > (float)turnmax) turnout = (float)turnmax;
+  if (turnout < (float)turnmin) turnout = (float)turnmin;
+
+  Turn_pwm = (float)(-turnout * kp_turn - Gyro_z * kd_turn);
+}
+
+void anglePWM()
+{
+  pwm2 = (float)(-PD_pwm - PI_pwm + Turn_pwm);
+  pwm1 = (float)(-PD_pwm - PI_pwm - Turn_pwm);
+
+  pwm1 = constrain(pwm1, -255.0f, 255.0f);
+  pwm2 = constrain(pwm2, -255.0f, 255.0f);
+
+  // 45도 초과 시 비상 정지
+  if (angle > 45.0f || angle < -45.0f) pwm1 = pwm2 = 0;
+
+  // 왼쪽 모터 구동
+  if (pwm2 >= 0) {
+    digitalWrite(left_L1, LOW);
+    digitalWrite(left_L2, HIGH);
+    analogWrite(PWM_L, (int)pwm2);
+  } else {
+    digitalWrite(left_L1, HIGH);
+    digitalWrite(left_L2, LOW);
+    analogWrite(PWM_L, (int)(-pwm2));
+  }
+
+  // 오른쪽 모터 구동
+  if (pwm1 >= 0) {
+    digitalWrite(right_R1, LOW);
+    digitalWrite(right_R2, HIGH);
+    analogWrite(PWM_R, (int)pwm1);
+  } else {
+    digitalWrite(right_R1, HIGH);
+    digitalWrite(right_R2, LOW);
+    analogWrite(PWM_R, (int)(-pwm1));
+  }
+}
+
+// 엔코더 카운트 아토믹 복사 및 클리어
+void countpulse_atomic()
+{
+  noInterrupts();
+  lz = count_left;
+  rz = count_right;
+  count_left = 0;
+  count_right = 0;
+  interrupts();
+
+  lpulse = (int)lz;
+  rpulse = (int)rz;
+
+  if ((pwm1 < 0) && (pwm2 < 0))      { rpulse = -rpulse; lpulse = -lpulse; }
+  else if ((pwm1 < 0) && (pwm2 > 0)) { lpulse = -lpulse; }
+  else if ((pwm1 > 0) && (pwm2 < 0)) { rpulse = -rpulse; }
+
+  pulseright += rpulse;
+  pulseleft  += lpulse;
+}
+
+void setup()
+{
+  pinMode(right_R1, OUTPUT);
+  pinMode(right_R2, OUTPUT);
+  pinMode(left_L1,  OUTPUT);
+  pinMode(left_L2,  OUTPUT);
+  pinMode(PWM_R,    OUTPUT);
+  pinMode(PWM_L,    OUTPUT);
+  pinMode(STBY,     OUTPUT);
+  pinMode(test,     OUTPUT);
+
+  digitalWrite(right_R1, 1);
+  digitalWrite(right_R2, 0);
+  digitalWrite(left_L1,  0);
+  digitalWrite(left_L2,  1);
+  digitalWrite(STBY,     1);
+  digitalWrite(test,     0);
+
+  analogWrite(PWM_R, 0);
+  analogWrite(PWM_L, 0);
+
+  pinMode(PinA_left,  INPUT);
+  pinMode(PinA_right, INPUT);
+
+  Wire.begin();
+  Serial.begin(9600);
+  delay(1500);
+
+  mpu6050.initialize();
+  delay(2);
+
+  attachPinChangeInterrupt(PinA_left,  Code_left,  CHANGE);
+  attachPinChangeInterrupt(PinA_right, Code_right, CHANGE);
+
+  MsTimer2::set(5, TimingInterrupt);
+  MsTimer2::start();
+}
+
+void loop()
+{
+  // 시리얼 명령어 수신 (블루투스 제어)
+  if (Serial.available()) {
+    val = Serial.read();
+    switch (val)
+    {
+      case 'a': // 전진
+        carfront = -150;
+        carback  = 0;
+        break;
+
+      case 'b': // 후진
+        carback  = 150;
+        carfront = 0;
+        break;
+
+      case 'c': // 좌회전
+        carleft = 1;
+        carright = 0;
+        break;
+
+      case 'd': // 우회전
+        carright = 1;
+        carleft = 0;
+        break;
+
+      case 'e':
+        carfront = 0; carback = 0; carleft = 0; carright = 0;
+        break;
+
+      case 'f': // 각도 출력
+        Serial.print(angle);
+        break;
+    }
+  }
+  
+  // 5ms 제어 루프
+  if (controlTick)
+  {
+    noInterrupts();
+    controlTick = false;
+    interrupts();
+
+    countpulse_atomic();
+    
+    mpu6050.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
+    
+    digitalWrite(test, 1);
+    angle_calculate(ax, ay, az, gx, gy, gz);
+    digitalWrite(test, 0);
+
+    AnglePD(); // 5ms 각도 제어
+
+    // 40ms 속도 제어 (8 ticks * 5ms)
+    cc++;
+    if (cc >= 8) {
+      carspeedpiout();
+      cc = 0;
+    }
+
+    // 20ms 방향 제어 (4 ticks * 5ms)
+    turncc++;
+    if (turncc > 4) {
+      carturnspin();
+      turncc = 0;
+    }
+    anglePWM();
+  }
+}
