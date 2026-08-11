@@ -39,7 +39,7 @@ float PCt_0, PCt_1, E;
 float angleY_one = 0; // Y축 상보필터 출력값
 
 // 제어 게인
-double kp = 49.4, ki = 0.0, kd = 0.58;                  // 각도 루프 (PD)  38, 0.0, 0.58
+double kp = 38, ki = 0.0, kd = 0.58;                  // 각도 루프 (PD)  38, 0.0, 0.58
 double kp_speed = 3.8, ki_speed = 0.11, kd_speed = 0.0; // 속도 루프 (PI)
 double kp_turn = 15, ki_turn = 0, kd_turn = 0.15;     // 회전 루프 (PD)
 
